@@ -1,0 +1,1869 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TechGlobal: S&OP War Room 2.0 — Simulación 4 Meses (Nov-Feb)</title>
+  <!-- Cliente ligero MQTT sobre WebSockets para sincronizar los 4 dispositivos en tiempo real -->
+  <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg-main: #0b1120;
+      --bg-card: #111827;
+      --bg-card-alt: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --accent: #06b6d4;
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.15);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.15);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.16);
+      --purple: #8b5cf6;
+      --border: #334155;
+      --radius: 14px;
+      --shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.55);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #1e293b 0%, #0b1120 55%, #060a12 100%);
+      color: var(--text-main);
+      min-height: 100vh;
+      line-height: 1.5;
+      padding-bottom: 60px;
+    }
+
+    /* BARRA SUPERIOR PERSISTENTE */
+    .top-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(11, 17, 32, 0.95);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand-box { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 38px; height: 38px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 900; color: #fff;
+      box-shadow: 0 0 14px rgba(59, 130, 246, 0.4);
+    }
+    .brand-title h1 { font-size: 1.05rem; font-weight: 800; color: #fff; }
+    .brand-title p { font-size: 0.73rem; color: var(--text-muted); }
+
+    .status-pills { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      font-size: 0.75rem; font-weight: 700; padding: 5px 11px;
+      border-radius: 999px; border: 1px solid var(--border);
+      background: var(--bg-card-alt); color: #e2e8f0;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .dot-local { background: var(--warning); }
+
+    .timer-box {
+      font-family: monospace; font-size: 1.2rem; font-weight: 900;
+      color: var(--accent); background: #0f172a; padding: 4px 12px;
+      border-radius: 8px; border: 1px solid var(--border);
+    }
+
+    .container { max-width: 1360px; margin: 20px auto; padding: 0 18px; }
+
+    /* TARJETAS Y BANNERS */
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+      margin-bottom: 18px;
+    }
+    .hero-banner {
+      background: linear-gradient(135deg, rgba(30, 58, 138, 0.82), rgba(15, 23, 42, 0.96));
+      border: 1px solid var(--primary); border-radius: var(--radius);
+      padding: 22px; margin-bottom: 18px; box-shadow: var(--shadow);
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;
+    }
+
+    .badge {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 0.71rem; font-weight: 800; text-transform: uppercase; margin-bottom: 6px;
+    }
+    .badge-blue { background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6; }
+    .badge-green { background: var(--success-bg); color: #6ee7b7; border: 1px solid var(--success); }
+    .badge-amber { background: var(--warning-bg); color: #fcd34d; border: 1px solid var(--warning); }
+    .badge-red { background: var(--danger-bg); color: #fca5a5; border: 1px solid var(--danger); }
+    .badge-purple { background: rgba(139, 92, 246, 0.2); color: #ddd6fe; border: 1px solid #8b5cf6; }
+
+    /* LOBBY DE LOS 4 DISPOSITIVOS */
+    .device-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px; margin-top: 16px;
+    }
+    .device-card {
+      background: var(--bg-card-alt); border: 2px solid var(--border);
+      border-radius: var(--radius); padding: 20px; cursor: pointer;
+      transition: all 0.2s ease; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .device-card:hover {
+      border-color: var(--primary); transform: translateY(-3px);
+      box-shadow: 0 12px 25px rgba(59, 130, 246, 0.25);
+    }
+    .device-card.host-card {
+      border-color: #8b5cf6;
+      background: linear-gradient(180deg, rgba(139, 92, 246, 0.14) 0%, var(--bg-card-alt) 100%);
+    }
+
+    /* BOTONES E INPUTS */
+    .btn {
+      border: none; border-radius: 10px; padding: 10px 16px;
+      font-size: 0.86rem; font-weight: 700; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn:hover:not(:disabled) { filter: brightness(1.1); }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), #1d4ed8); color: #fff; }
+    .btn-success { background: linear-gradient(135deg, var(--success), #059669); color: #fff; }
+    .btn-warning { background: linear-gradient(135deg, var(--warning), #d97706); color: #fff; }
+    .btn-danger { background: linear-gradient(135deg, var(--danger), #dc2626); color: #fff; }
+    .btn-purple { background: linear-gradient(135deg, #7c3aed, #4f46e5); color: #fff; }
+    .btn-secondary { background: var(--bg-card-alt); color: #fff; border: 1px solid var(--border); }
+    .btn-secondary.active-stage { border-color: #38bdf8; background: rgba(6, 182, 212, 0.22); color: #fff; }
+
+    .input-box {
+      background: #0f172a; border: 1px solid var(--border); color: #fff;
+      padding: 10px 14px; border-radius: 10px; font-size: 0.96rem; font-weight: 700; width: 100%;
+    }
+
+    /* CONSOLA DE CONTROL DE ORGANIZADORAS */
+    .host-control-bar {
+      background: linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%);
+      border: 2px solid #8b5cf6; border-radius: var(--radius);
+      padding: 16px 20px; margin-bottom: 20px; box-shadow: var(--shadow);
+    }
+    .stage-pipeline {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .pipeline-btn {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      color: #cbd5e1;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+    }
+    .pipeline-btn:hover { border-color: #60a5fa; color: #fff; }
+    .pipeline-btn.current {
+      background: linear-gradient(135deg, #2563eb, #0891b2);
+      border-color: #67e8f9;
+      color: #fff;
+      box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+    }
+    .pipeline-btn span {
+      display: block;
+      font-size: 0.66rem;
+      color: #94a3b8;
+      font-weight: 400;
+    }
+    .pipeline-btn.current span { color: #e0f2fe; }
+
+    /* GRIDS Y TABLAS */
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 12px; margin-bottom: 16px;
+    }
+    .kpi-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 13px;
+    }
+    .kpi-label { font-size: 0.71rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; }
+    .kpi-val { font-size: 1.28rem; font-weight: 800; color: #fff; margin: 3px 0; }
+    .kpi-sub { font-size: 0.72rem; color: var(--text-muted); }
+
+    .teams-status-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(305px, 1fr));
+      gap: 16px; margin-bottom: 18px;
+    }
+    .team-status-card {
+      background: var(--bg-card); border: 2px solid var(--border);
+      border-radius: var(--radius); padding: 18px;
+    }
+    .team-status-card.received {
+      border-color: var(--success);
+      background: linear-gradient(180deg, rgba(16, 185, 129, 0.1) 0%, var(--bg-card) 100%);
+    }
+
+    .mode-selector { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 6px; }
+    .mode-btn {
+      background: #0f172a; border: 2px solid var(--border); color: #cbd5e1;
+      padding: 10px 6px; border-radius: 10px; cursor: pointer; text-align: center;
+      font-weight: 700; font-size: 0.81rem;
+    }
+    .mode-btn span { display: block; font-size: 0.68rem; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
+    .mode-btn.selected { border-color: var(--accent); background: rgba(6, 182, 212, 0.2); color: #fff; }
+
+    .quick-qty-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .qty-chip {
+      background: var(--bg-card-alt); color: #cbd5e1; border: 1px solid var(--border);
+      border-radius: 6px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer;
+    }
+    .qty-chip:hover:not(:disabled) { background: var(--primary); color: #fff; }
+
+    table.data-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.data-table th {
+      background: #0f172a; color: #94a3b8; text-transform: uppercase;
+      font-size: 0.69rem; padding: 9px 8px; text-align: left; border-bottom: 1px solid var(--border);
+    }
+    table.data-table td { padding: 9px 8px; border-bottom: 1px solid rgba(51, 65, 85, 0.6); color: #e2e8f0; }
+    .num-pos { color: #34d399; font-weight: 800; }
+    .num-neg { color: #f87171; font-weight: 800; }
+    .num-warn { color: #fbbf24; font-weight: 800; }
+
+    .discussion-box {
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.16), rgba(15, 23, 42, 0.95));
+      border-left: 5px solid #8b5cf6;
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-top: 16px;
+    }
+
+    .bar-row { margin-bottom: 12px; }
+    .bar-label-line { display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; flex-wrap: wrap; }
+    .bar-track { width: 100%; height: 22px; background: #0f172a; border-radius: 8px; overflow: hidden; display: flex; border: 1px solid var(--border); }
+    .bar-fill { height: 100%; display: flex; align-items: center; padding-left: 8px; font-size: 0.71rem; font-weight: 800; color: #fff; white-space: nowrap; }
+  </style>
+</head>
+<body>
+
+  <!-- BARRA SUPERIOR PERSISTENTE -->
+  <header class="top-header">
+    <div class="brand-box">
+      <div class="brand-icon">S&amp;OP</div>
+      <div class="brand-title">
+        <h1>TechGlobal: S&amp;OP War Room 2.0 (Ciclo 4 Meses: Nov – Feb)</h1>
+        <p>Universidad Sergio Arboleda | Plan de Ventas y Operaciones — Grupo 2</p>
+      </div>
+    </div>
+
+    <div class="status-pills">
+      <div class="pill" id="sync-status-pill">
+        <span class="dot dot-local" id="sync-dot"></span>
+        <span id="sync-text">Sincronización Activa</span>
+      </div>
+      <div class="pill" id="room-code-pill" style="display:none;">
+        🔑 Sala: <strong id="header-room-code" style="color:#60a5fa;">TG26</strong>
+      </div>
+      <div class="pill" id="device-role-pill" style="display:none;">
+        📱 <strong id="header-role-name">Lobby</strong>
+      </div>
+      <div class="timer-box" id="header-timer">15:00</div>
+      <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.75rem; display:none;" id="btn-switch-device" onclick="window.returnToLobby()">
+        🔄 Cambiar Dispositivo
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ===================================================================
+         PANTALLA 0: LOBBY DE INGRESO PARA LOS 4 DISPOSITIVOS
+         =================================================================== -->
+    <section id="view-lobby">
+      <div class="hero-banner">
+        <div>
+          <span class="badge badge-blue">Simulación S&amp;OP e IBP de 4 Meses Encadenados (180 Minutos)</span>
+          <h2 style="font-size:1.5rem; color:#fff; margin-bottom:6px;">Bienvenido a TechGlobal: S&amp;OP War Room 2.0</h2>
+          <p style="color:#cbd5e1; max-width:780px; font-size:0.91rem;">
+            Cada decisión mensual de inventario y transporte impacta directamente la disponibilidad y los costos del mes siguiente
+            a lo largo de cuatro rondas: <strong>Noviembre (Planificación Inicial)</strong>, <strong>Diciembre (Crisis y Analítica)</strong>,
+            <strong>Enero (Crisis de Abastecimiento)</strong> y <strong>Febrero (Reto Integral S&amp;OP)</strong>.
+          </p>
+        </div>
+        <div style="background:#0f172a; padding:16px; border-radius:12px; border:1px solid var(--primary); min-width:250px;">
+          <label style="font-size:0.76rem; color:#93c5fd; font-weight:700; display:block; margin-bottom:6px;">
+            🔑 CÓDIGO DE LA PARTIDA (SALA):
+          </label>
+          <input type="text" id="lobby-room-input" class="input-box" value="TG26" maxlength="10" style="text-transform:uppercase; text-align:center; font-size:1.3rem; letter-spacing:2px;" />
+          <div style="font-size:0.71rem; color:var(--text-muted); margin-top:6px; text-align:center;">
+            Ingresa el mismo código en los 4 dispositivos
+          </div>
+        </div>
+      </div>
+
+      <h3 style="font-size:1.02rem; color:#fff; margin-bottom:6px;">Selecciona qué dispositivo estás utilizando en este momento:</h3>
+      <p style="font-size:0.83rem; color:var(--text-muted); margin-bottom:12px;">
+        Cada equipo verá únicamente su inventario heredado, sus pedidos en tránsito y su propio formulario de decisión.
+      </p>
+
+      <div class="device-grid">
+        <div class="device-card host-card" onclick="window.enterAsRole('HOST')">
+          <div>
+            <span class="badge badge-purple">Dispositivo 4 — Proyector Salón</span>
+            <h3 style="font-size:1.18rem; color:#fff; margin:8px 0;">🖥️ Computador Organizadoras (Proyector)</h3>
+            <p style="font-size:0.83rem; color:#cbd5e1; margin-bottom:14px;">
+              Consola maestra para <strong>Paula, Alejandra, Catherine y Laura</strong>. Controla las 4 rondas, los análisis mensuales,
+              el Modo Secreto del proyector, el cronómetro y la clasificación acumulada.
+            </p>
+          </div>
+          <button type="button" class="btn btn-purple" style="width:100%;">
+            🎛️ Entrar como Organizadoras (Host)
+          </button>
+        </div>
+
+        <div class="device-card" onclick="window.enterAsRole('A')">
+          <div>
+            <span class="badge badge-blue">Dispositivo 1 — Jugadores</span>
+            <h3 style="font-size:1.18rem; color:#60a5fa; margin:8px 0;">📱 Equipo A — Sucursal Norte</h3>
+            <p style="font-size:0.83rem; color:#cbd5e1; margin-bottom:14px;">
+              Sesión privada del Comité S&amp;OP de la <strong>Sucursal Norte</strong> (Ventas, Logística y Finanzas).
+            </p>
+          </div>
+          <button type="button" class="btn btn-primary" style="width:100%;">🚀 Entrar como Equipo A</button>
+        </div>
+
+        <div class="device-card" onclick="window.enterAsRole('B')">
+          <div>
+            <span class="badge badge-green">Dispositivo 2 — Jugadores</span>
+            <h3 style="font-size:1.18rem; color:#34d399; margin:8px 0;">📱 Equipo B — Sucursal Centro</h3>
+            <p style="font-size:0.83rem; color:#cbd5e1; margin-bottom:14px;">
+              Sesión privada del Comité S&amp;OP de la <strong>Sucursal Centro</strong> (Ventas, Logística y Finanzas).
+            </p>
+          </div>
+          <button type="button" class="btn btn-success" style="width:100%;">🚀 Entrar como Equipo B</button>
+        </div>
+
+        <div class="device-card" onclick="window.enterAsRole('C')">
+          <div>
+            <span class="badge badge-amber">Dispositivo 3 — Jugadores</span>
+            <h3 style="font-size:1.18rem; color:#c084fc; margin:8px 0;">📱 Equipo C — Sucursal Sur</h3>
+            <p style="font-size:0.83rem; color:#cbd5e1; margin-bottom:14px;">
+              Sesión privada del Comité S&amp;OP de la <strong>Sucursal Sur</strong> (Ventas, Logística y Finanzas).
+            </p>
+          </div>
+          <button type="button" class="btn btn-warning" style="width:100%;">🚀 Entrar como Equipo C</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         VISTA DEL COMPUTADOR DE LAS ORGANIZADORAS + PROYECTOR
+         =================================================================== -->
+    <section id="view-host" style="display:none;">
+
+      <div class="host-control-bar">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span class="badge badge-purple">Consola Maestra — Paula, Alejandra, Catherine y Laura</span>
+            <h3 style="color:#fff; font-size:1.02rem;">
+              Etapa Activa en Proyector y Celulares: <span id="host-stage-label" style="color:#67e8f9;">Bienvenida</span>
+            </h3>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostToggleTimer()">⏯️ Reloj</button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostSetTimer(900)">15m</button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostSetTimer(600)">10m</button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostSetTimer(300)">5m</button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostToggleSecretMask()" id="btn-toggle-mask">
+              🕵️ Modo Secreto: ACTIVO
+            </button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.toggleManualEntryModal()">⌨️ Respaldo Manual</button>
+            <button type="button" class="btn btn-secondary" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostLoadDemoData()">🧪 Cargar Demo 4 Meses</button>
+            <button type="button" class="btn btn-danger" style="padding:5px 10px; font-size:0.74rem;" onclick="window.hostResetGame()">🗑️ Reiniciar</button>
+          </div>
+        </div>
+
+        <!-- FLUJO DE LAS 10 ETAPAS (BIENVENIDA + 4 MESES CON SU ANÁLISIS + PODIO FINAL) -->
+        <div class="stage-pipeline" id="host-pipeline-nav"></div>
+
+        <!-- ACCIONES RÁPIDAS DE RONDA ABIERTA/CERRADA -->
+        <div id="host-round-quickbar" style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(139,92,246,0.35); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;"></div>
+
+        <!-- MODAL DE INGRESO MANUAL DE RESPALDO -->
+        <div id="manual-entry-box" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid rgba(139,92,246,0.4);">
+          <div style="font-size:0.78rem; color:#c4b5fd; margin-bottom:8px; font-weight:700;">
+            🛠️ Registro Manual de Respaldo (Por si algún celular pierde conexión en el salón):
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+            <select id="man-team" class="input-box" style="width:auto; padding:6px 10px; font-size:0.8rem;">
+              <option value="A">Equipo A (Norte)</option>
+              <option value="B">Equipo B (Centro)</option>
+              <option value="C">Equipo C (Sur)</option>
+            </select>
+            <select id="man-round" class="input-box" style="width:auto; padding:6px 10px; font-size:0.8rem;">
+              <option value="r1">Ronda 1 — Noviembre</option>
+              <option value="r2">Ronda 2 — Diciembre</option>
+              <option value="r3">Ronda 3 — Enero</option>
+              <option value="r4">Ronda 4 — Febrero</option>
+            </select>
+            <input type="number" id="man-q" class="input-box" placeholder="Cantidad" value="500" step="100" style="width:120px; padding:6px 10px; font-size:0.8rem;" />
+            <select id="man-mode" class="input-box" style="width:auto; padding:6px 10px; font-size:0.8rem;">
+              <option value="BARCO">BARCO</option>
+              <option value="MIXTO">MIXTO (50/50)</option>
+              <option value="AVION">AVIÓN</option>
+              <option value="NINGUNO">NINGUNO (0)</option>
+            </select>
+            <select id="man-price" class="input-box" style="width:auto; padding:6px 10px; font-size:0.8rem;" title="Solo aplica en Ronda 4 (Febrero)">
+              <option value="ESTANDAR">Precio Estándar ($100)</option>
+              <option value="PREMIUM">Precio Premium ($115)</option>
+              <option value="PROMO">Precio Promo ($88)</option>
+            </select>
+            <button type="button" class="btn btn-success" style="padding:6px 12px; font-size:0.78rem;" onclick="window.hostSaveManualOverride()">
+              💾 Guardar Decisión
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONTENIDO PROYECTADO -->
+      <div id="host-projector-content"></div>
+
+    </section>
+
+    <!-- ===================================================================
+         VISTA PRIVADA DE CADA EQUIPO (DISPOSITIVOS A, B O C)
+         =================================================================== -->
+    <section id="view-team" style="display:none;">
+      <div id="team-dynamic-content"></div>
+    </section>
+
+  </main>
+
+  <script>
+    (function() {
+      /* =================================================================
+         1. DEFINICIÓN DE LAS 10 ETAPAS Y PARÁMETROS DE LOS 4 MESES
+         ================================================================= */
+      const STAGES_LIST = [
+        { id: 'welcome', title: '0. Bienvenida', sub: 'Reglas y Cronograma' },
+        { id: 'r1',      title: '1. Noviembre', sub: 'Planificación Inicial' },
+        { id: 'rev1',    title: '1B. Shock Nov', sub: 'Crisis y Análisis R1' },
+        { id: 'r2',      title: '2. Diciembre', sub: 'Analítica e IA' },
+        { id: 'rev2',    title: '2B. Análisis Dic', sub: 'Resultados R2' },
+        { id: 'r3',      title: '3. Enero', sub: 'Crisis Abastecimiento' },
+        { id: 'rev3',    title: '3B. Análisis Ene', sub: 'Resultados R3' },
+        { id: 'r4',      title: '4. Febrero', sub: 'Reto Integral S&OP' },
+        { id: 'rev4',    title: '4B. Análisis Feb', sub: 'Resultados R4' },
+        { id: 'results', title: '5. 🏆 Podio Final', sub: 'Acumulado 4 Meses' }
+      ];
+
+      const ROUND_INFO = {
+        r1: {
+          num: 1, month: 'Noviembre', title: 'Ronda 1 (Noviembre): Planificación Inicial — “Vuelo a Ciegas”',
+          badge: 'Mes 1 de 4 — S&OP Tradicional',
+          context: 'TechGlobal S.A. inicia noviembre con 1,500 Smartwatches en su bodega de Bogotá. Todavía no cuentan con herramientas de analítica avanzada: únicamente disponen del Reporte Histórico del ERP que muestra una demanda promedio estable de 2,000 unidades mensuales.',
+          forecastLabel: 'Promedio Histórico ERP (Últimos 6 meses)',
+          forecastVal: 2000,
+          realDemand: 4000,
+          barcoCost: 5, avionCost: 20, mixtoCost: 12.5,
+          barcoRule: 'Estándar ($5/u, 4 sem). Sujeto a condiciones del Puerto de Buenaventura.',
+          mixtoRule: '50% Barco + 50% Avión ($12.5/u). Mitiga parcialmente retrasos marítimos.',
+          avionRule: 'Exprés ($20/u, 1 sem). Llega 100% a tiempo en noviembre.',
+          almCost: 10, quiebreCost: 30,
+          insightDone: 'El promedio histórico estático (2,000 uds) ocultó el pico viral en TikTok (4,000 uds) y la congestión en Buenaventura retrasó todos los barcos hacia diciembre.',
+          debateQuestion: '💬 Pregunta para debatir en el comité (3 min): ¿Cómo cambia su necesidad de compra para Diciembre sabiendo que los barcos retrasados de Noviembre acaban de desembarcar hoy en su bodega?'
+        },
+        r2: {
+          num: 2, month: 'Diciembre', title: 'Ronda 2 (Diciembre): Crisis Portuaria y Analítica Predictiva',
+          badge: 'Mes 2 de 4 — S&OP Digital e IA',
+          context: '¡Atención al efecto encadenado! Su inventario inicial de Diciembre es el Inventario Final que les quedó en Noviembre MÁS las unidades marítimas retrasadas de Noviembre que acaban de desembarcar. TechGlobal activó su Dashboard de IA Predictiva y Gemelo Digital Logístico.',
+          forecastLabel: 'Pronóstico IA Machine Learning (98% confianza)',
+          forecastVal: 4000,
+          realDemand: 4000,
+          barcoCost: 5, avionCost: 20, mixtoCost: 12.5,
+          barcoRule: '🚨 ALERTA ROJA EN PUERTO ($5/u): Congestión continúa en diciembre (0% llega este mes; desembarcará recién en Enero).',
+          mixtoRule: '⚠️ 50% Barco + 50% Avión ($12.5/u): Solo el 50% aéreo llega en diciembre; el 50% marítimo llega en enero.',
+          avionRule: '✅ RUTA ÓPTIMA PRESCRIPTIVA ($20/u): 100% disponible para las ventas navideñas de diciembre.',
+          almCost: 10, quiebreCost: 30,
+          insightDone: 'Cada equipo partió con un inventario distinto heredado de Noviembre. Quienes descontaron su mercancía entrante y cubrieron el déficit exacto por avión lograron $0 en multas de quiebre y $0 en sobrestock.',
+          debateQuestion: '💬 Pregunta para debatir en el comité (3 min): Si en Enero el puerto marítimo reabre pero el proveedor de Asia limita su producción, ¿seguiría siendo rentable pedir todo por avión?'
+        },
+        r3: {
+          num: 3, month: 'Enero', title: 'Ronda 3 (Enero): Crisis de Abastecimiento en Asia y Alza Aérea',
+          badge: 'Mes 3 de 4 — Gestión de Proveedores y Riesgo',
+          context: 'En Enero cambia por completo el panorama internacional: 1) Por cierre de Año Nuevo Lunar y escasez de chips, el proveedor principal en Shenzhen solo entrega hasta 1,500 unidades al costo normal de $40/u; toda unidad adicional por encima de 1,500 requiere activar un Proveedor Alterno en Taiwán a $55/u (+$15/u de sobrecosto). 2) ¡El Puerto de Buenaventura REABRIÓ con servicio Fast-Track ($8/u, 100% a tiempo en Enero)!, mientras que el flete por AVIÓN subió a $35/u por escasez de combustible Jet Fuel.',
+          forecastLabel: 'Pronóstico IA Enero (con margen de error estadístico ±7%)',
+          forecastVal: 2800,
+          realDemand: 3000,
+          barcoCost: 8, avionCost: 35, mixtoCost: 20,
+          barcoRule: '✅ PUERTO REABIERTO FAST-TRACK ($8/u): 100% de las unidades llegan a tiempo en Enero.',
+          mixtoRule: '✅ RUTA COMBINADA ($20/u): 100% llega a tiempo en Enero, pero cuesta más que el barco.',
+          avionRule: '⚠️ ALERTA SOBRECOSTO JET FUEL ($35/u): Llega a tiempo, pero su alta tarifa erosiona el margen operativo.',
+          almCost: 10, quiebreCost: 30,
+          insightDone: 'Esta ronda demostró dos lecciones reales de S&OP: 1) Elegir siempre avión sin leer las tarifas actuales destruye la rentabilidad ($35/u vs $8/u en barco reabierto). 2) Los pronósticos de IA tienen variabilidad estadística (2,800 proyectado vs 3,000 real), por lo que mantener un colchón de seguridad evita quiebres.',
+          debateQuestion: '💬 Pregunta para debatir en el comité (3 min): En Febrero cerramos la temporada antes del lanzamiento del Smartwatch 2.0 y cualquier unidad sobrante costará $20/u de liquidación. ¿Cómo usarán el precio de venta para controlar la demanda?'
+        },
+        r4: {
+          num: 4, month: 'Febrero', title: 'Ronda 4 (Febrero): Reto Integral de S&OP / IBP (Precio, Logística y Cierre)',
+          badge: 'Mes 4 de 4 — Integrated Business Planning (IBP)',
+          context: 'Último mes antes del lanzamiento del nuevo Smartwatch 2.0. Aquí deben coordinar las 3 gerencias simultáneamente: 1) VENTAS elige la Estrategia de Precio (Estándar $100, Premium $115 o Promo $88) que modifica la demanda del mercado. 2) LOGÍSTICA enfrenta mantenimiento de grúas en puerto: el BARCO ($6/u) solo logra desembarcar el 70% a tiempo en Febrero (el 30% llega tarde), mientras que la Ruta MULTIMODAL MIXTA ($14/u) y el AVIÓN ($22/u) entregan el 100% a tiempo. 3) FINANZAS alerta que toda unidad no vendida o atrasada al cierre de Febrero paga $20/u por obsolescencia tecnológica.',
+          forecastLabel: 'Pronóstico IA según Precio Elegido (Estándar: 2,900 | Premium: 2,100 | Promo: 3,700)',
+          forecastVal: 2900,
+          realDemand: 3000,
+          barcoCost: 6, avionCost: 22, mixtoCost: 14,
+          barcoRule: '⚠️ MANTENIMIENTO DE GRÚAS ($6/u): Solo el 70% del pedido llega a tiempo en Febrero; el 30% llega tarde y paga $20/u de obsolescencia.',
+          mixtoRule: '✅ MULTIMODAL PRIORITARIO ($14/u): Contrato 50% muelle prioritario + 50% carga aérea. 100% llega a tiempo en Febrero.',
+          avionRule: '✈️ FLETE AÉREO ($22/u): 100% llega a tiempo en Febrero, pero a mayor costo que la ruta Multimodal ($14/u).',
+          almCost: 20, quiebreCost: 30,
+          insightDone: 'El Reto Integral de Febrero demostró qué es el IBP (Integrated Business Planning): alinear el Precio Comercial con el Inventario Heredado y el Transporte Multimodal ($14/u) para cerrar la temporada con 100% de nivel de servicio y cero obsolescencia.',
+          debateQuestion: '💬 Reflexión Final antes del Podio: ¿Cuál fue el error más costoso de su sucursal a lo largo de los 4 meses y cómo lo habría evitado una mejor coordinación S&OP?'
+        }
+      };
+
+      function createFreshGameState(roomCode) {
+        return {
+          roomCode: (roomCode || 'TG26').toUpperCase(),
+          stage: 'welcome', // welcome | r1 | rev1 | r2 | rev2 | r3 | rev3 | r4 | rev4 | results
+          openRounds: { r1: false, r2: false, r3: false, r4: false },
+          secretMask: true,
+          r1ShockActivated: false, // En rev1 permite mostrar Pre-Shock (2,000) y disparar Post-Shock (4,000)
+          timerSeconds: 900,
+          timerRunning: false,
+          updatedAt: Date.now(),
+          teams: {
+            A: {
+              id: 'A', name: 'Equipo A — Sucursal Norte', color: '#3b82f6',
+              r1: { q: 500,  mode: 'BARCO', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r2: { q: 3500, mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r3: { q: 3000, mode: 'BARCO', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r4: { q: 2200, mode: 'MIXTO', priceTier: 'PREMIUM',  note: '', submitted: false, time: '', bonus: false }
+            },
+            B: {
+              id: 'B', name: 'Equipo B — Sucursal Centro', color: '#10b981',
+              r1: { q: 1000, mode: 'BARCO', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r2: { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r3: { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r4: { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false }
+            },
+            C: {
+              id: 'C', name: 'Equipo C — Sucursal Sur', color: '#8b5cf6',
+              r1: { q: 500,  mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r2: { q: 2500, mode: 'AVION', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r3: { q: 1500, mode: 'BARCO', priceTier: 'ESTANDAR', note: '', submitted: false, time: '', bonus: false },
+              r4: { q: 3000, mode: 'BARCO', priceTier: 'PROMO',    note: '', submitted: false, time: '', bonus: false }
+            }
+          }
+        };
+      }
+
+      let myRole = null; // null | 'HOST' | 'A' | 'B' | 'C'
+      let roomCode = 'TG26';
+      let gameState = createFreshGameState('TG26');
+
+      let teamDraft = {
+        r1: { q: 500,  mode: 'BARCO', priceTier: 'ESTANDAR', note: '', editing: false, simQ: 500,  simMode: 'BARCO', simPrice: 'ESTANDAR' },
+        r2: { q: 3500, mode: 'AVION', priceTier: 'ESTANDAR', note: '', editing: false, simQ: 3500, simMode: 'AVION', simPrice: 'ESTANDAR' },
+        r3: { q: 3000, mode: 'BARCO', priceTier: 'ESTANDAR', note: '', editing: false, simQ: 3000, simMode: 'BARCO', simPrice: 'ESTANDAR' },
+        r4: { q: 3000, mode: 'MIXTO', priceTier: 'ESTANDAR', note: '', editing: false, simQ: 3000, simMode: 'MIXTO', simPrice: 'ESTANDAR' }
+      };
+
+      /* =================================================================
+         2. MOTOR MATEMÁTICO ENCADENADO DE 4 MESES (CONSECUENCIAS REALES)
+         ================================================================= */
+      function computeSingleMonth(roundKey, decision, invBodegaPrev, transitArrivingPrev, usePreShockR1) {
+        const q = Math.max(0, Math.round(Number(decision.q) || 0));
+        let mode = (decision.mode || 'BARCO').toUpperCase();
+        if (q === 0) mode = 'NINGUNO';
+        const priceTier = (decision.priceTier || 'ESTANDAR').toUpperCase();
+        const bonusVal = decision.bonus ? 10000 : 0;
+
+        const invInicialMes = invBodegaPrev + transitArrivingPrev;
+        let dPronostico = 2000;
+        let dReal = 4000;
+        let precioVenta = 100;
+        let uTiempo = 0;
+        let uRetrasadas = 0;
+        let costoFlete = 0;
+        let sobrecostoProveedor = 0;
+        let costoUnitAlm = 10;
+
+        if (roundKey === 'r1') {
+          dPronostico = 2000;
+          dReal = usePreShockR1 ? 2000 : 4000;
+          precioVenta = 100;
+          costoUnitAlm = 10;
+          if (mode === 'AVION') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 20;
+          } else if (mode === 'MIXTO') {
+            uTiempo = usePreShockR1 ? q : Math.round(q * 0.5);
+            uRetrasadas = q - uTiempo;
+            costoFlete = Math.round(q * 12.5);
+          } else if (mode === 'BARCO') {
+            uTiempo = usePreShockR1 ? q : 0;
+            uRetrasadas = q - uTiempo;
+            costoFlete = q * 5;
+          }
+        } else if (roundKey === 'r2') {
+          dPronostico = 4000;
+          dReal = 4000;
+          precioVenta = 100;
+          costoUnitAlm = 10;
+          if (mode === 'AVION') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 20;
+          } else if (mode === 'MIXTO') {
+            uTiempo = Math.round(q * 0.5);
+            uRetrasadas = q - uTiempo;
+            costoFlete = Math.round(q * 12.5);
+          } else if (mode === 'BARCO') {
+            uTiempo = 0; uRetrasadas = q; costoFlete = q * 5;
+          }
+        } else if (roundKey === 'r3') {
+          dPronostico = 2800;
+          dReal = 3000;
+          precioVenta = 100;
+          costoUnitAlm = 10;
+          if (mode === 'AVION') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 35;
+          } else if (mode === 'MIXTO') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 20;
+          } else if (mode === 'BARCO') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 8;
+          }
+          // En Enero: Proveedor principal en Shenzhen tiene cupo máximo de 1,500 uds a $40/u; exceso cuesta +$15/u ($55/u)
+          const extraUnits = Math.max(0, q - 1500);
+          sobrecostoProveedor = extraUnits * 15;
+        } else if (roundKey === 'r4') {
+          if (priceTier === 'PREMIUM') {
+            precioVenta = 115; dPronostico = 2100; dReal = 2200;
+          } else if (priceTier === 'PROMO') {
+            precioVenta = 88; dPronostico = 3700; dReal = 3800;
+          } else {
+            precioVenta = 100; dPronostico = 2900; dReal = 3000;
+          }
+          costoUnitAlm = 20; // Obsolescencia fin de temporada por salida de Smartwatch 2.0
+          if (mode === 'AVION') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 22;
+          } else if (mode === 'MIXTO') {
+            uTiempo = q; uRetrasadas = 0; costoFlete = q * 14;
+          } else if (mode === 'BARCO') {
+            uTiempo = Math.round(q * 0.7);
+            uRetrasadas = q - uTiempo;
+            costoFlete = q * 6;
+          }
+        }
+
+        const iDisp = invInicialMes + uTiempo;
+        const vendidas = Math.min(dReal, iDisp);
+        const quiebre = Math.max(0, dReal - iDisp);
+        const invFinalBodega = iDisp - vendidas;
+        const sobrantesTotales = invFinalBodega + uRetrasadas;
+
+        const ingresos = vendidas * precioVenta;
+        const cogsBase = vendidas * 40;
+        const cogsTotal = cogsBase + sobrecostoProveedor;
+        const costoAlm = sobrantesTotales * costoUnitAlm;
+        const multaQuiebre = quiebre * 30;
+
+        const utilidadOperativa = ingresos - cogsTotal - costoFlete - costoAlm - multaQuiebre;
+        const utilidadTotalMes = utilidadOperativa + bonusVal;
+        const fillRate = dReal > 0 ? (vendidas / dReal) * 100 : 100;
+        const margenNeto = ingresos > 0 ? (utilidadOperativa / ingresos) * 100 : 0;
+
+        return {
+          roundKey, q, mode, priceTier, precioVenta,
+          invBodegaPrev, transitArrivingPrev, invInicialMes,
+          uTiempo, uRetrasadas, iDisp,
+          dPronostico, dReal, vendidas, quiebre,
+          invFinalBodega, sobrantesTotales,
+          ingresos, cogsBase, sobrecostoProveedor, cogsTotal,
+          costoFlete, costoAlm, multaQuiebre,
+          utilidadOperativa, bonusVal, utilidadTotalMes,
+          fillRate, margenNeto
+        };
+      }
+
+      // Calcula la historia encadenada completa de los 4 meses para un equipo
+      function computeTeamFullTimeline(teamObj, usePreShockR1) {
+        let invBodega = 1500;
+        let transitArriving = 0;
+        const timeline = {};
+        let cumProfit = 0;
+        let totalSold = 0;
+        let totalDemand = 0;
+
+        ['r1', 'r2', 'r3', 'r4'].forEach(rk => {
+          const m = computeSingleMonth(rk, teamObj[rk], invBodega, transitArriving, rk === 'r1' ? usePreShockR1 : false);
+          cumProfit += m.utilidadTotalMes;
+          totalSold += m.vendidas;
+          totalDemand += m.dReal;
+          m.cumProfitAfterMonth = cumProfit;
+          m.cumFillRateAfterMonth = totalDemand > 0 ? (totalSold / totalDemand) * 100 : 100;
+          timeline[rk] = m;
+
+          // Encadenamiento real al mes siguiente:
+          // Lo que quedó en bodega + lo que venía en barco retrasado ahora está disponible al inicio del siguiente mes
+          invBodega = m.invFinalBodega;
+          transitArriving = m.uRetrasadas;
+        });
+
+        return timeline;
+      }
+
+      function fmtMoney(val) {
+        const sign = val < 0 ? '-' : '';
+        return sign + '$' + Math.abs(Math.round(val)).toLocaleString('en-US');
+      }
+      function fmtNum(val) { return Math.round(val).toLocaleString('en-US'); }
+      function escapeHtml(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      /* =================================================================
+         3. MOTOR DE SINCRONIZACIÓN MULTIDISPOSITIVO (MQTT + LOCAL)
+         ================================================================= */
+      let mqttClient = null;
+      let mqttConnected = false;
+      let bcChannel = null;
+      let timerInterval = null;
+
+      function getStorageKey(code) {
+        return 'techglobal_warroom_4m_' + (code || 'TG26').toUpperCase();
+      }
+
+      function initSyncEngines(code) {
+        roomCode = (code || 'TG26').toUpperCase().trim() || 'TG26';
+        try {
+          const saved = localStorage.getItem(getStorageKey(roomCode));
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && parsed.teams && parsed.teams.A && parsed.teams.A.r4) {
+              gameState = parsed;
+            }
+          } else {
+            gameState.roomCode = roomCode;
+          }
+        } catch (e) {}
+
+        try {
+          if (bcChannel) bcChannel.close();
+          bcChannel = new BroadcastChannel('techglobal_4m_channel_' + roomCode);
+          bcChannel.onmessage = (ev) => handleIncomingSyncMessage(ev.data);
+        } catch (e) {}
+
+        window.onstorage = (ev) => {
+          if (ev.key === getStorageKey(roomCode) && ev.newValue) {
+            try {
+              const st = JSON.parse(ev.newValue);
+              handleIncomingSyncMessage({ type: 'STATE_SYNC', state: st });
+            } catch (e) {}
+          }
+        };
+
+        connectMqttBroker(roomCode);
+      }
+
+      function connectMqttBroker(code) {
+        if (typeof window.mqtt === 'undefined') {
+          updateSyncPill(false, 'Modo Local Activo');
+          return;
+        }
+        try {
+          if (mqttClient) { try { mqttClient.end(true); } catch (e) {} }
+          mqttClient = window.mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+            clientId: 'tg4m_' + code + '_' + Math.random().toString(16).slice(2, 8),
+            clean: true,
+            connectTimeout: 5000,
+            reconnectPeriod: 4000
+          });
+
+          const baseTopic = 'us_arboleda/sop_warroom_4m/' + code;
+
+          mqttClient.on('connect', () => {
+            mqttConnected = true;
+            updateSyncPill(true, 'Nube 4 Dispositivos Conectada');
+            mqttClient.subscribe(baseTopic + '/state', { qos: 1 });
+            mqttClient.subscribe(baseTopic + '/team/+', { qos: 1 });
+            mqttClient.subscribe(baseTopic + '/req_state', { qos: 0 });
+
+            if (myRole === 'HOST') publishHostState();
+            else if (myRole) mqttClient.publish(baseTopic + '/req_state', JSON.stringify({ from: myRole, t: Date.now() }));
+          });
+
+          mqttClient.on('message', (topic, payload) => {
+            try { handleIncomingSyncMessage(JSON.parse(payload.toString())); } catch (e) {}
+          });
+
+          mqttClient.on('error', () => updateSyncPill(false, 'Sincronización Local Activa'));
+          mqttClient.on('offline', () => { mqttConnected = false; updateSyncPill(false, 'Sincronización Local Activa'); });
+        } catch (e) {
+          updateSyncPill(false, 'Sincronización Local Activa');
+        }
+      }
+
+      function updateSyncPill(isOnline, text) {
+        const dot = document.getElementById('sync-dot');
+        const txt = document.getElementById('sync-text');
+        if (dot) dot.className = isOnline ? 'dot dot-online' : 'dot dot-local';
+        if (txt) txt.textContent = text;
+      }
+
+      function handleIncomingSyncMessage(msg) {
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'REQ_STATE' || msg.from) {
+          if (myRole === 'HOST') publishHostState();
+          return;
+        }
+        if (msg.type === 'TEAM_SUBMISSION' && msg.teamId && msg.roundKey) {
+          const tid = msg.teamId;
+          const rk = msg.roundKey;
+          if (gameState.teams[tid] && gameState.teams[tid][rk]) {
+            gameState.teams[tid][rk].q = msg.q;
+            gameState.teams[tid][rk].mode = msg.mode;
+            gameState.teams[tid][rk].priceTier = msg.priceTier || 'ESTANDAR';
+            gameState.teams[tid][rk].note = msg.note || '';
+            gameState.teams[tid][rk].submitted = true;
+            gameState.teams[tid][rk].time = msg.time || new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+            gameState.updatedAt = Date.now();
+            saveLocalState();
+            if (myRole === 'HOST') publishHostState();
+            renderCurrentRoleView();
+          }
+          return;
+        }
+        if (msg.type === 'STATE_SYNC' && msg.state && msg.state.teams) {
+          if (myRole !== 'HOST') {
+            gameState = msg.state;
+            saveLocalState();
+            renderCurrentRoleView();
+          }
+        }
+      }
+
+      function saveLocalState() {
+        try { localStorage.setItem(getStorageKey(roomCode), JSON.stringify(gameState)); } catch (e) {}
+      }
+
+      function publishHostState() {
+        gameState.updatedAt = Date.now();
+        saveLocalState();
+        const packet = { type: 'STATE_SYNC', state: gameState };
+        try { if (bcChannel) bcChannel.postMessage(packet); } catch (e) {}
+        try {
+          if (mqttClient && mqttConnected) {
+            mqttClient.publish('us_arboleda/sop_warroom_4m/' + roomCode + '/state', JSON.stringify(packet), { qos: 1, retain: true });
+          }
+        } catch (e) {}
+      }
+
+      function sendTeamDecisionPacket(teamId, roundKey, q, mode, priceTier, note) {
+        const timeStr = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        if (gameState.teams[teamId] && gameState.teams[teamId][roundKey]) {
+          gameState.teams[teamId][roundKey].q = q;
+          gameState.teams[teamId][roundKey].mode = mode;
+          gameState.teams[teamId][roundKey].priceTier = priceTier || 'ESTANDAR';
+          gameState.teams[teamId][roundKey].note = note || '';
+          gameState.teams[teamId][roundKey].submitted = true;
+          gameState.teams[teamId][roundKey].time = timeStr;
+          saveLocalState();
+        }
+        const packet = { type: 'TEAM_SUBMISSION', teamId, roundKey, q, mode, priceTier, note, time: timeStr };
+        try { if (bcChannel) bcChannel.postMessage(packet); } catch (e) {}
+        try {
+          if (mqttClient && mqttConnected) {
+            mqttClient.publish('us_arboleda/sop_warroom_4m/' + roomCode + '/team/' + teamId, JSON.stringify(packet), { qos: 1 });
+          }
+        } catch (e) {}
+      }
+
+      /* =================================================================
+         4. INGRESO AL ROL Y NAVEGACIÓN DE ORGANIZADORAS
+         ================================================================= */
+      window.enterAsRole = function(role) {
+        const inp = document.getElementById('lobby-room-input');
+        const code = inp ? inp.value.trim().toUpperCase() : 'TG26';
+        myRole = role;
+        initSyncEngines(code || 'TG26');
+
+        if (role === 'A' || role === 'B' || role === 'C') {
+          const t = gameState.teams[role];
+          ['r1', 'r2', 'r3', 'r4'].forEach(rk => {
+            teamDraft[rk].q = t[rk].q;
+            teamDraft[rk].mode = t[rk].mode;
+            teamDraft[rk].priceTier = t[rk].priceTier || 'ESTANDAR';
+            teamDraft[rk].note = t[rk].note || '';
+          });
+        }
+
+        document.getElementById('view-lobby').style.display = 'none';
+        document.getElementById('room-code-pill').style.display = 'inline-flex';
+        document.getElementById('device-role-pill').style.display = 'inline-flex';
+        document.getElementById('btn-switch-device').style.display = 'inline-flex';
+        document.getElementById('header-room-code').textContent = roomCode;
+
+        const roleNames = {
+          HOST: 'Computador Organizadoras (Proyector)',
+          A: 'Equipo A — Sucursal Norte',
+          B: 'Equipo B — Sucursal Centro',
+          C: 'Equipo C — Sucursal Sur'
+        };
+        document.getElementById('header-role-name').textContent = roleNames[role] || role;
+
+        if (role === 'HOST') {
+          document.getElementById('view-host').style.display = 'block';
+          document.getElementById('view-team').style.display = 'none';
+          publishHostState();
+        } else {
+          document.getElementById('view-host').style.display = 'none';
+          document.getElementById('view-team').style.display = 'block';
+        }
+        renderCurrentRoleView();
+      };
+
+      window.returnToLobby = function() {
+        myRole = null;
+        document.getElementById('view-lobby').style.display = 'block';
+        document.getElementById('view-host').style.display = 'none';
+        document.getElementById('view-team').style.display = 'none';
+        document.getElementById('btn-switch-device').style.display = 'none';
+      };
+
+      function renderCurrentRoleView() {
+        updateHeaderTimer();
+        if (myRole === 'HOST') renderHostView();
+        else if (myRole === 'A' || myRole === 'B' || myRole === 'C') renderTeamView(myRole);
+      }
+
+      /* CONTROLES DEL HOST */
+      window.hostGoStage = function(stageId) {
+        gameState.stage = stageId;
+        if (stageId === 'r1' || stageId === 'r2' || stageId === 'r3' || stageId === 'r4') {
+          gameState.openRounds[stageId] = true;
+          gameState.secretMask = true;
+        }
+        if (stageId === 'rev1' || stageId === 'rev2' || stageId === 'rev3' || stageId === 'rev4') {
+          const rk = 'r' + stageId.replace('rev', '');
+          gameState.openRounds[rk] = false;
+        }
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostToggleRoundOpen = function(rk) {
+        gameState.openRounds[rk] = !gameState.openRounds[rk];
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostToggleSecretMask = function() {
+        gameState.secretMask = !gameState.secretMask;
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostToggleR1Shock = function() {
+        gameState.r1ShockActivated = !gameState.r1ShockActivated;
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostToggleBonus = function(teamId, rk, isChecked) {
+        if (gameState.teams[teamId] && gameState.teams[teamId][rk]) {
+          gameState.teams[teamId][rk].bonus = Boolean(isChecked);
+          publishHostState();
+          renderCurrentRoleView();
+        }
+      };
+
+      window.toggleManualEntryModal = function() {
+        const box = document.getElementById('manual-entry-box');
+        if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      };
+
+      window.hostSaveManualOverride = function() {
+        const tid = document.getElementById('man-team').value;
+        const rk = document.getElementById('man-round').value;
+        const qVal = Math.max(0, Math.round(Number(document.getElementById('man-q').value) || 0));
+        let modeVal = document.getElementById('man-mode').value;
+        const priceVal = document.getElementById('man-price').value;
+        if (qVal === 0) modeVal = 'NINGUNO';
+
+        if (gameState.teams[tid] && gameState.teams[tid][rk]) {
+          gameState.teams[tid][rk].q = qVal;
+          gameState.teams[tid][rk].mode = modeVal;
+          gameState.teams[tid][rk].priceTier = priceVal;
+          gameState.teams[tid][rk].submitted = true;
+          gameState.teams[tid][rk].time = 'Manual (Host)';
+          publishHostState();
+          renderCurrentRoleView();
+        }
+      };
+
+      window.hostLoadDemoData = function() {
+        // Equipo A: Estratega S&OP coherente en los 4 meses
+        gameState.teams.A.r1 = { q: 500,  mode: 'BARCO', priceTier: 'ESTANDAR', note: 'Pedimos 500 por barco según histórico ERP.', submitted: true, time: '09:20', bonus: false };
+        gameState.teams.A.r2 = { q: 3500, mode: 'AVION', priceTier: 'ESTANDAR', note: 'Descontamos las 500 uds que desembarcaron de Nov y pedimos 3,500 por avión.', submitted: true, time: '09:55', bonus: true };
+        gameState.teams.A.r3 = { q: 3000, mode: 'BARCO', priceTier: 'ESTANDAR', note: 'Usamos Barco Fast-Track reabierto ($8/u) y cubrimos el límite superior del pronóstico (3,000).', submitted: true, time: '10:35', bonus: true };
+        gameState.teams.A.r4 = { q: 2200, mode: 'MIXTO', priceTier: 'PREMIUM',  note: 'Precio Premium ($115) con ruta Multimodal ($14/u, 100% a tiempo) y 0 obsolescencia.', submitted: true, time: '11:15', bonus: true };
+
+        // Equipo B: Abusa del avión sin leer cambios logísticos en Enero y Febrero
+        gameState.teams.B.r1 = { q: 1000, mode: 'BARCO', priceTier: 'ESTANDAR', note: 'Pedimos 1,000 por barco para dejar stock de seguridad.', submitted: true, time: '09:21', bonus: false };
+        gameState.teams.B.r2 = { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: 'Teníamos 1,000 desembarcando de Nov + 3,000 en avión = 4,000 uds.', submitted: true, time: '09:56', bonus: false };
+        gameState.teams.B.r3 = { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: 'Pedimos todo en avión por velocidad sin notar el alza a $35/u.', submitted: true, time: '10:36', bonus: false };
+        gameState.teams.B.r4 = { q: 3000, mode: 'AVION', priceTier: 'ESTANDAR', note: 'Seguimos usando avión ($22/u) en vez de Multimodal ($14/u).', submitted: true, time: '11:16', bonus: false };
+
+        // Equipo C: Recorta compras sin coordinar áreas y sufre quiebres y retrasos
+        gameState.teams.C.r1 = { q: 500,  mode: 'AVION', priceTier: 'ESTANDAR', note: 'Pedimos 500 por avión para asegurar entrega.', submitted: true, time: '09:22', bonus: false };
+        gameState.teams.C.r2 = { q: 2500, mode: 'AVION', priceTier: 'ESTANDAR', note: 'Olvidamos que nuestro inventario inicial era 0 y solo pedimos 2,500.', submitted: true, time: '09:57', bonus: false };
+        gameState.teams.C.r3 = { q: 1500, mode: 'BARCO', priceTier: 'ESTANDAR', note: 'Finanzas prohibió pagar el proveedor alterno ($55/u) y quedamos cortos.', submitted: true, time: '10:37', bonus: false };
+        gameState.teams.C.r4 = { q: 3000, mode: 'BARCO', priceTier: 'PROMO',    note: 'Pusimos promoción ($88) pero enviamos por barco (solo llegó el 70%).', submitted: true, time: '11:17', bonus: false };
+
+        gameState.r1ShockActivated = true;
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostResetGame = function() {
+        gameState = createFreshGameState(roomCode);
+        publishHostState();
+        renderCurrentRoleView();
+      };
+
+      window.hostToggleTimer = function() {
+        if (timerInterval) {
+          clearInterval(timerInterval); timerInterval = null;
+          gameState.timerRunning = false;
+        } else {
+          gameState.timerRunning = true;
+          timerInterval = setInterval(() => {
+            if (gameState.timerSeconds > 0) {
+              gameState.timerSeconds--;
+              updateHeaderTimer();
+              if (gameState.timerSeconds % 5 === 0) publishHostState();
+            } else {
+              clearInterval(timerInterval); timerInterval = null;
+              gameState.timerRunning = false;
+              publishHostState();
+            }
+          }, 1000);
+        }
+        publishHostState();
+      };
+
+      window.hostSetTimer = function(sec) {
+        if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+        gameState.timerSeconds = sec;
+        gameState.timerRunning = false;
+        updateHeaderTimer();
+        publishHostState();
+      };
+
+      function updateHeaderTimer() {
+        const el = document.getElementById('header-timer');
+        if (!el) return;
+        const sec = Math.max(0, Number(gameState.timerSeconds) || 0);
+        const m = Math.floor(sec / 60), s = sec % 60;
+        el.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        el.style.color = sec <= 60 ? '#ef4444' : '#06b6d4';
+      }
+
+      /* =================================================================
+         5. RENDERIZADO DEL COMPUTADOR DE LAS ORGANIZADORAS (PROYECTOR)
+         ================================================================= */
+      function renderHostView() {
+        const navContainer = document.getElementById('host-pipeline-nav');
+        const quickBar = document.getElementById('host-round-quickbar');
+        const content = document.getElementById('host-projector-content');
+        const stageLbl = document.getElementById('host-stage-label');
+        const btnMask = document.getElementById('btn-toggle-mask');
+
+        const currStageObj = STAGES_LIST.find(s => s.id === gameState.stage) || STAGES_LIST[0];
+        if (stageLbl) stageLbl.textContent = currStageObj.title + ' — ' + currStageObj.sub;
+        if (btnMask) {
+          btnMask.textContent = gameState.secretMask ? '🕵️ Modo Secreto: ACTIVO (Oculta números)' : '👁️ Modo Secreto: VISIBLE';
+        }
+
+        // Renderizar barra de 10 etapas
+        if (navContainer) {
+          navContainer.innerHTML = STAGES_LIST.map(s => `
+            <button type="button" class="pipeline-btn ${gameState.stage === s.id ? 'current' : ''}" onclick="window.hostGoStage('${s.id}')">
+              ${s.title}
+              <span>${s.sub}</span>
+            </button>
+          `).join('');
+        }
+
+        const st = gameState.stage;
+
+        // Barra rápida contextual según la etapa
+        if (quickBar) {
+          if (st === 'r1' || st === 'r2' || st === 'r3' || st === 'r4') {
+            const isOpen = gameState.openRounds[st];
+            const revStage = 'rev' + st.replace('r', '');
+            quickBar.innerHTML = `
+              <div style="font-size:0.84rem; color:#e2e8f0;">
+                Estado de <strong>${ROUND_INFO[st].month}</strong> en los celulares:
+                <span class="badge ${isOpen ? 'badge-green' : 'badge-red'}" style="margin-left:6px;">
+                  ${isOpen ? '🟢 ABIERTA PARA ENVÍOS' : '🔒 CERRADA'}
+                </span>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn ${isOpen ? 'btn-warning' : 'btn-success'}" onclick="window.hostToggleRoundOpen('${st}')">
+                  ${isOpen ? '🔒 Cerrar Envíos de ' + ROUND_INFO[st].month : '🔓 Reabrir Envíos de ' + ROUND_INFO[st].month}
+                </button>
+                <button type="button" class="btn btn-primary" onclick="window.hostGoStage('${revStage}')">
+                  📊 Cerrar Mes y Mostrar Análisis de ${ROUND_INFO[st].month} ➔
+                </button>
+              </div>
+            `;
+          } else if (st === 'rev1' || st === 'rev2' || st === 'rev3' || st === 'rev4') {
+            const rNum = Number(st.replace('rev', ''));
+            const nextStage = rNum < 4 ? ('r' + (rNum + 1)) : 'results';
+            const nextLabel = rNum < 4 ? ('🟢 Abrir Ronda ' + (rNum + 1) + ' (' + ROUND_INFO[nextStage].month + ') ➔') : '🏆 Ir a Clasificación Acumulada Final ➔';
+            quickBar.innerHTML = `
+              <div style="font-size:0.84rem; color:#c4b5fd;">
+                💡 Moderen la discusión de la pregunta en pantalla (5–8 min) antes de abrir el siguiente mes.
+              </div>
+              <button type="button" class="btn btn-success" onclick="window.hostGoStage('${nextStage}')">
+                ${nextLabel}
+              </button>
+            `;
+          } else {
+            quickBar.innerHTML = `
+              <div style="font-size:0.82rem; color:var(--text-muted);">
+                Selecciona cualquier etapa en la barra superior para avanzar o retroceder durante la sesión de 3 horas.
+              </div>
+              <button type="button" class="btn btn-primary" onclick="window.hostGoStage('r1')">
+                🚀 Iniciar Ronda 1 (Noviembre) ➔
+              </button>
+            `;
+          }
+        }
+
+        // 1. PANTALLA DE BIENVENIDA Y CRONOGRAMA DE 180 MINUTOS
+        if (st === 'welcome') {
+          content.innerHTML = `
+            <div class="hero-banner">
+              <div>
+                <span class="badge badge-green">Sala Sincronizada Activa — Código: ${roomCode}</span>
+                <h2 style="font-size:1.55rem; color:#fff; margin-bottom:6px;">
+                  TechGlobal S.A.: Simulación Secuencial S&amp;OP de 4 Meses (Noviembre a Febrero)
+                </h2>
+                <p style="color:#cbd5e1; max-width:820px; font-size:0.92rem;">
+                  Las decisiones de compra y transporte que tome cada sucursal en un mes determinan directamente el
+                  <strong>Inventario en Bodega</strong> y los <strong>Pedidos en Tránsito</strong> con los que iniciará el mes siguiente.
+                </p>
+              </div>
+              <button type="button" class="btn btn-primary" style="font-size:1rem; padding:14px 22px;" onclick="window.hostGoStage('r1')">
+                🟢 Abrir Ronda 1: Noviembre ➔
+              </button>
+            </div>
+
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#fcd34d;">Mes 1: Noviembre</div>
+                <div class="kpi-val" style="font-size:1.05rem;">Planificación Inicial</div>
+                <div class="kpi-sub">ERP histórico (2,000 uds) + Shock viral y bloqueo en puerto</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#38bdf8;">Mes 2: Diciembre</div>
+                <div class="kpi-val" style="font-size:1.05rem;">Crisis y Analítica IA</div>
+                <div class="kpi-sub">Desembarco de tránsito + Pronóstico ML (4,000) + Gemelo Digital</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#f87171;">Mes 3: Enero</div>
+                <div class="kpi-val" style="font-size:1.05rem;">Crisis Abastecimiento</div>
+                <div class="kpi-sub">Cupo proveedor (1,500 uds), sobrecosto Taiwán ($55) y Barco Fast-Track</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#c084fc;">Mes 4: Febrero</div>
+                <div class="kpi-val" style="font-size:1.05rem;">Reto Integral IBP</div>
+                <div class="kpi-sub">Estrategia de Precio + Ruta Multimodal ($14) + Liquidación ($20/u)</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="font-size:1rem; color:#fff; margin-bottom:10px;">🕒 Cronograma Sugerido para la Clase Presencial (150 a 180 Minutos)</h3>
+              <div style="overflow-x:auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Bloque</th><th>Actividad en el Salón</th><th>Duración</th><th>Líderes Organizadoras</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td><strong>1. Apertura</strong></td><td>Llamado a lista, presentación teórica (8 diapositivas) y conexión de los 4 dispositivos a la sala <strong>${roomCode}</strong>.</td><td>20 - 25 min</td><td>Paula y Alejandra</td></tr>
+                    <tr><td><strong>2. Noviembre (R1)</strong></td><td>Debate en equipos con ERP tradicional (12 min) + Revelación del Shock en vivo y debate de consecuencias (13 min).</td><td>25 min</td><td>Catherine y Laura</td></tr>
+                    <tr><td><strong>3. Diciembre (R2)</strong></td><td>Análisis de inventario en tránsito heredado + Simulador What-If IA (15 min) + Análisis de resultados R2 (10 min).</td><td>25 min</td><td>Paula y Laura</td></tr>
+                    <tr><td><strong>4. Enero (R3)</strong></td><td>Crisis de proveedor en Asia (cupo 1,500 uds) y cambio de tarifas aéreas vs marítimas (15 min) + Debriefing R3 (15 min).</td><td>30 min</td><td>Alejandra y Catherine</td></tr>
+                    <tr><td><strong>5. Febrero (R4)</strong></td><td>Reto Integral IBP: elección simultánea de Precio Comercial, Compra y Transporte Multimodal (20 min) + Análisis R4 (10 min).</td><td>30 min</td><td>Todas las organizadoras</td></tr>
+                    <tr><td><strong>6. Cierre Académico</strong></td><td>Podio acumulado de 4 meses, otorgamiento de bonos por justificación y reflexión final con el docente.</td><td>25 - 30 min</td><td>Catherine y Laura</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        // 2. PANTALLAS DE RONDA EN VIVO EN EL PROYECTOR (r1, r2, r3, r4)
+        if (st === 'r1' || st === 'r2' || st === 'r3' || st === 'r4') {
+          const info = ROUND_INFO[st];
+          const isOpen = gameState.openRounds[st];
+          const teamsArr = [gameState.teams.A, gameState.teams.B, gameState.teams.C];
+          const submittedCount = teamsArr.filter(t => t[st].submitted).length;
+
+          const timelines = {
+            A: computeTeamFullTimeline(gameState.teams.A, false),
+            B: computeTeamFullTimeline(gameState.teams.B, false),
+            C: computeTeamFullTimeline(gameState.teams.C, false)
+          };
+
+          content.innerHTML = `
+            <div class="hero-banner">
+              <div>
+                <span class="badge ${isOpen ? 'badge-green' : 'badge-red'}">${info.badge} — ${isOpen ? 'ABIERTA EN CELULARES' : 'CERRADA'}</span>
+                <h2 style="font-size:1.45rem; color:#fff; margin-bottom:6px;">${info.title}</h2>
+                <p style="color:#cbd5e1; max-width:850px; font-size:0.89rem;">${info.context}</p>
+              </div>
+              <div style="text-align:right; min-width:170px;">
+                <div style="font-size:0.76rem; color:var(--text-muted);">Decisiones recibidas</div>
+                <div style="font-size:1.85rem; font-weight:900; color:${submittedCount === 3 ? '#34d399' : '#fbbf24'};">
+                  ${submittedCount} / 3 Equipos
+                </div>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <div class="kpi-card" style="border-color:var(--primary);">
+                <div class="kpi-label">${info.forecastLabel}</div>
+                <div class="kpi-val" style="color:#38bdf8;">${fmtNum(info.forecastVal)} uds</div>
+                <div class="kpi-sub">${st === 'r4' ? 'Varía según Precio (2,100 / 2,900 / 3,700)' : 'Referencia para el comité'}</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Opción Marítima (BARCO)</div>
+                <div class="kpi-val" style="color:#67e8f9;">$${info.barcoCost} / u</div>
+                <div class="kpi-sub">${info.barcoRule}</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Opción Híbrida (MIXTO)</div>
+                <div class="kpi-val" style="color:#c084fc;">$${info.mixtoCost} / u</div>
+                <div class="kpi-sub">${info.mixtoRule}</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Opción Aérea (AVIÓN)</div>
+                <div class="kpi-val" style="color:#60a5fa;">$${info.avionCost} / u</div>
+                <div class="kpi-sub">${info.avionRule}</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Almacén vs Multa Quiebre</div>
+                <div class="kpi-val" style="color:#fbbf24;">$${info.almCost} vs $${info.quiebreCost}</div>
+                <div class="kpi-sub">${st === 'r3' ? 'Cupo proveedor $40/u: 1,500 uds (Exceso: $55/u)' : 'Por unidad sobrante vs venta perdida'}</div>
+              </div>
+            </div>
+
+            <div class="teams-status-grid">
+              ${teamsArr.map(t => {
+                const sub = t[st];
+                const mCurr = timelines[t.id][st];
+                const showNumbers = !gameState.secretMask;
+                return `
+                  <div class="team-status-card ${sub.submitted ? 'received' : ''}">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                      <h3 style="color:${t.color}; font-size:1.12rem;">${t.name}</h3>
+                      <span class="badge ${sub.submitted ? 'badge-green' : 'badge-amber'}">
+                        ${sub.submitted ? '✅ ORDEN RECIBIDA' : '⏳ EN DEBATE...'}
+                      </span>
+                    </div>
+
+                    <!-- INVENTARIO CON EL QUE INICIA ESTE MES LA SUCURSAL -->
+                    <div style="background:rgba(30,41,59,0.7); padding:9px 12px; border-radius:8px; margin-bottom:10px; font-size:0.79rem; border:1px solid var(--border);">
+                      <div>📦 <strong>Inventario Inicial en ${info.month}: ${fmtNum(mCurr.invInicialMes)} uds</strong></div>
+                      <div style="color:var(--text-muted); font-size:0.73rem;">
+                        (En bodega física: ${fmtNum(mCurr.invBodegaPrev)} uds + Desembarcando de tránsito anterior: ${fmtNum(mCurr.transitArrivingPrev)} uds)
+                      </div>
+                    </div>
+
+                    ${sub.submitted ? `
+                      <div style="background:#0f172a; padding:13px; border-radius:10px; border:1px solid var(--success);">
+                        ${showNumbers ? `
+                          <div style="font-size:1.15rem; font-weight:800; color:#fff;">
+                            Pedido: ${fmtNum(sub.q)} uds (${sub.mode})
+                            ${st === 'r4' ? ` | Precio: ${sub.priceTier}` : ''}
+                          </div>
+                          ${sub.note ? `<div style="font-size:0.78rem; color:#cbd5e1; margin-top:4px;">💬 "${escapeHtml(sub.note)}"</div>` : ''}
+                        ` : `
+                          <div style="font-size:0.96rem; font-weight:800; color:#6ee7b7;">
+                            🔒 Decisión guardada en secreto
+                          </div>
+                          <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+                            Los números se revelarán al pasar a la pantalla de Análisis de ${info.month}.
+                          </div>
+                        `}
+                        <div style="font-size:0.7rem; color:#94a3b8; margin-top:6px;">Hora: ${sub.time || 'Confirmado'}</div>
+                      </div>
+                    ` : `
+                      <div style="background:#0f172a; padding:16px; border-radius:10px; border:1px dashed var(--border); text-align:center; color:var(--text-muted); font-size:0.83rem;">
+                        Esperando envío desde el dispositivo de <strong>${t.name}</strong>...
+                      </div>
+                    `}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+          return;
+        }
+
+        // 3. PANTALLAS DE ANÁLISIS Y RESULTADOS MENSUALES (rev1, rev2, rev3, rev4)
+        if (st === 'rev1' || st === 'rev2' || st === 'rev3' || st === 'rev4') {
+          const rk = 'r' + st.replace('rev', '');
+          content.innerHTML = buildMonthlyReviewHTML(rk, true);
+          return;
+        }
+
+        // 4. PANTALLA FINAL ACUMULADA DE LOS 4 MESES
+        if (st === 'results') {
+          content.innerHTML = buildFinalCumulativeHTML(true);
+        }
+      }
+
+      /* =================================================================
+         6. CONSTRUCCIÓN DE PANTALLA DE ANÁLISIS MENSUAL (POST-RONDA)
+         ================================================================= */
+      function buildMonthlyReviewHTML(rk, isHost) {
+        const info = ROUND_INFO[rk];
+        const usePreShock = (rk === 'r1' && !gameState.r1ShockActivated);
+        const teamsArr = [gameState.teams.A, gameState.teams.B, gameState.teams.C];
+
+        const timelines = {
+          A: computeTeamFullTimeline(gameState.teams.A, usePreShock),
+          B: computeTeamFullTimeline(gameState.teams.B, usePreShock),
+          C: computeTeamFullTimeline(gameState.teams.C, usePreShock)
+        };
+
+        return `
+          ${rk === 'r1' ? `
+            <div class="card" style="border:2px solid var(--danger); background:linear-gradient(135deg, rgba(127,29,29,0.92), rgba(15,23,42,0.96));">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+                <div>
+                  <span class="badge ${gameState.r1ShockActivated ? 'badge-red' : 'badge-amber'}">
+                    ${gameState.r1ShockActivated ? '🚨 SHOCK DE NOVIEMBRE ACTIVADO — REALIDAD DEL MERCADO' : 'Vista Pre-Shock (Expectativa en Papel según ERP)'}
+                  </span>
+                  <h2 style="font-size:1.45rem; color:#fff; margin-bottom:4px;">
+                    ${gameState.r1ShockActivated
+                      ? '¡Crisis en Noviembre! Demanda Viral en TikTok (4,000 uds) + Retraso Portuario en Buenaventura'
+                      : 'Expectativa Inicial de Noviembre (Demanda esperada = 2,000 uds y Barco a tiempo)'}
+                  </h2>
+                  <p style="color:#fecaca; max-width:780px; font-size:0.88rem;">
+                    ${gameState.r1ShockActivated
+                      ? 'Los pedidos enviados por BARCO en noviembre NO lograron llegar a tiempo para las ventas de este mes, pero quedan en tránsito y DESEMBARCARÁN automáticamente al inicio de Diciembre.'
+                      : 'Presiona el botón rojo para revelar qué ocurrió realmente con la demanda y los barcos en noviembre.'}
+                  </p>
+                </div>
+                ${isHost ? `
+                  <button type="button" class="btn ${gameState.r1ShockActivated ? 'btn-secondary' : 'btn-danger'}" style="padding:13px 18px; font-size:0.92rem;" onclick="window.hostToggleR1Shock()">
+                    ${gameState.r1ShockActivated ? '🔄 Ver Expectativa Pre-Shock' : '🚨 ¡DISPARAR SHOCK DE NOVIEMBRE EN VIVO!'}
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          ` : `
+            <div class="hero-banner">
+              <div>
+                <span class="badge badge-blue">Cierre Operativo y Financiero — ${info.month}</span>
+                <h2 style="font-size:1.45rem; color:#fff; margin-bottom:4px;">📊 Resultados y Consecuencias de ${info.month}</h2>
+                <p style="color:#cbd5e1; max-width:840px; font-size:0.88rem;">
+                  Observa qué decidió cada comité, cómo impactó sus costos y qué inventario o tránsito heredará para el mes siguiente.
+                </p>
+              </div>
+            </div>
+          `}
+
+          <div class="card">
+            <h3 style="font-size:1rem; color:#fff; margin-bottom:10px;">
+              📋 Desglose Operativo, Inventario Encadenado y Rentabilidad de ${info.month}
+            </h3>
+            <div style="overflow-x:auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Equipo</th>
+                    <th>Inv. Inicial Mes (Bodega + Tránsito)</th>
+                    <th>Decisión (${info.month})</th>
+                    <th>Llegan a Tiempo</th>
+                    <th>Inv. Disponible</th>
+                    <th>Demanda Real</th>
+                    <th>Vendidas</th>
+                    <th>Quiebre (Perdidas)</th>
+                    <th>Pasa al Mes Siguiente (Bodega + Tránsito)</th>
+                    <th>Ingresos</th>
+                    <th>COGS ${rk === 'r3' ? '(+Sobrecosto Prov.)' : ''}</th>
+                    <th>Flete</th>
+                    <th>Almacén</th>
+                    <th>Multa Quiebre</th>
+                    <th>Bono (+10k)</th>
+                    <th>UTILIDAD MES</th>
+                    <th>ACUMULADO HASTA ${info.month.toUpperCase()}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${teamsArr.map(t => {
+                    const m = timelines[t.id][rk];
+                    const nextInvTotal = m.invFinalBodega + m.uRetrasadas;
+                    return `
+                      <tr>
+                        <td><strong style="color:${t.color};">${t.name}</strong></td>
+                        <td><strong>${fmtNum(m.invInicialMes)}</strong> <span style="font-size:0.72rem; color:#94a3b8;">(${fmtNum(m.invBodegaPrev)}+${fmtNum(m.transitArrivingPrev)})</span></td>
+                        <td><strong>${fmtNum(m.q)} (${m.mode})</strong> ${rk === 'r4' ? `<span class="badge badge-purple">${m.priceTier} ($${m.precioVenta})</span>` : ''}</td>
+                        <td>${fmtNum(m.uTiempo)}</td>
+                        <td><strong>${fmtNum(m.iDisp)}</strong></td>
+                        <td>${fmtNum(m.dReal)}</td>
+                        <td>${fmtNum(m.vendidas)} (${m.fillRate.toFixed(0)}%)</td>
+                        <td class="${m.quiebre > 0 ? 'num-neg' : ''}">${fmtNum(m.quiebre)}</td>
+                        <td style="color:#38bdf8; font-weight:700;">
+                          ${fmtNum(nextInvTotal)} uds <span style="font-size:0.71rem; color:#94a3b8;">(Bod:${fmtNum(m.invFinalBodega)} + Trán:${fmtNum(m.uRetrasadas)})</span>
+                        </td>
+                        <td>${fmtMoney(m.ingresos)}</td>
+                        <td>-${fmtMoney(m.cogsTotal)} ${m.sobrecostoProveedor > 0 ? `<span style="font-size:0.7rem; color:#f87171;">(+$15/u: -${fmtMoney(m.sobrecostoProveedor)})</span>` : ''}</td>
+                        <td>-${fmtMoney(m.costoFlete)}</td>
+                        <td>-${fmtMoney(m.costoAlm)}</td>
+                        <td class="${m.multaQuiebre > 0 ? 'num-neg' : ''}">-${fmtMoney(m.multaQuiebre)}</td>
+                        <td>
+                          ${isHost
+                            ? `<input type="checkbox" style="width:17px; height:17px; cursor:pointer;" ${t[rk].bonus ? 'checked' : ''} onchange="window.hostToggleBonus('${t.id}','${rk}',this.checked)" />`
+                            : (m.bonusVal > 0 ? '+$10,000' : '$0')}
+                        </td>
+                        <td class="${m.utilidadTotalMes >= 100000 ? 'num-pos' : (m.utilidadTotalMes >= 0 ? 'num-warn' : 'num-neg')}" style="font-size:0.95rem;">
+                          ${fmtMoney(m.utilidadTotalMes)}
+                        </td>
+                        <td class="num-pos" style="font-size:0.98rem;">${fmtMoney(m.cumProfitAfterMonth)}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- ARGUMENTOS ENVIADOS POR LOS EQUIPOS -->
+            <div class="kpi-grid" style="margin-top:14px; margin-bottom:0;">
+              ${teamsArr.map(t => `
+                <div class="kpi-card">
+                  <div class="kpi-label" style="color:${t.color};">Justificación ${t.name}</div>
+                  <p style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">
+                    ${t[rk].note ? `"${escapeHtml(t[rk].note)}"` : '<em>Sin comentario registrado en esta ronda.</em>'}
+                  </p>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- LECCIÓN DEL MES Y PREGUNTA DE DEBATE PARA LOS EQUIPOS -->
+            <div class="discussion-box">
+              <div style="font-size:0.84rem; color:#67e8f9; font-weight:800; margin-bottom:4px;">
+                🧠 Aprendizaje Clave de ${info.month}:
+              </div>
+              <p style="font-size:0.85rem; color:#e2e8f0; margin-bottom:10px;">${info.insightDone}</p>
+              <div style="font-size:0.9rem; color:#fcd34d; font-weight:800;">${info.debateQuestion}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      /* =================================================================
+         7. RENDERIZADO PRIVADO DEL DISPOSITIVO DE CADA EQUIPO (A, B, C)
+         ================================================================= */
+      function renderTeamView(teamId) {
+        const container = document.getElementById('team-dynamic-content');
+        if (!container) return;
+
+        const t = gameState.teams[teamId];
+        const st = gameState.stage;
+        const timeline = computeTeamFullTimeline(t, st === 'rev1' ? !gameState.r1ShockActivated : false);
+
+        if (st === 'welcome') {
+          container.innerHTML = `
+            <div class="hero-banner">
+              <div>
+                <span class="badge badge-green">Conectado a la Sala ${roomCode}</span>
+                <h2 style="color:${t.color}; font-size:1.45rem;">📱 Dispositivo Oficial: ${t.name}</h2>
+                <p style="color:#cbd5e1; font-size:0.9rem;">
+                  Competirán a lo largo de <strong>4 meses consecutivos (Noviembre, Diciembre, Enero y Febrero)</strong>.
+                  Recuerden: el inventario que les sobre o los pedidos en barco que se retrasen pasarán automáticamente a su inventario del mes siguiente.
+                </p>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        // SI ESTÁ EN UNA DE LAS 4 RONDAS DE DECISIÓN (r1, r2, r3, r4)
+        if (st === 'r1' || st === 'r2' || st === 'r3' || st === 'r4') {
+          const info = ROUND_INFO[st];
+          const isOpen = gameState.openRounds[st];
+          const sub = t[st];
+          const draft = teamDraft[st];
+          const mCurr = timeline[st];
+          const canEdit = isOpen && (!sub.submitted || draft.editing);
+
+          // Simulador What-If en tiempo real para el equipo (disponible desde Diciembre r2, r3, r4)
+          const simMetrics = computeSingleMonth(
+            st,
+            { q: draft.simQ, mode: draft.simMode, priceTier: draft.simPrice, bonus: false },
+            mCurr.invBodegaPrev,
+            mCurr.transitArrivingPrev,
+            false
+          );
+
+          container.innerHTML = `
+            <!-- BANNER DE ESTADO E INVENTARIO HEREDADO DEL EQUIPO -->
+            <div class="card" style="border:2px solid ${t.color};">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+                <div>
+                  <span class="badge ${isOpen ? 'badge-green' : 'badge-red'}">${info.badge} — ${isOpen ? 'RONDA ABIERTA' : 'RONDA CERRADA'}</span>
+                  <h2 style="color:${t.color}; font-size:1.35rem;">${t.name} — ${info.month}</h2>
+                </div>
+                <span class="badge ${sub.submitted ? 'badge-green' : 'badge-amber'}">
+                  ${sub.submitted ? '✅ Orden Enviada' : '⏳ Pendiente de Envío'}
+                </span>
+              </div>
+
+              <p style="font-size:0.86rem; color:#cbd5e1; margin-bottom:12px;">${info.context}</p>
+
+              <!-- TARJETA DE INVENTARIO ENCADENADO DE LA SUCURSAL -->
+              <div class="kpi-grid" style="margin-bottom:14px;">
+                <div class="kpi-card" style="border-color:#38bdf8;">
+                  <div class="kpi-label">Tu Inventario Inicial (${info.month})</div>
+                  <div class="kpi-val" style="color:#38bdf8;">${fmtNum(mCurr.invInicialMes)} uds</div>
+                  <div class="kpi-sub">Bodega previa: ${fmtNum(mCurr.invBodegaPrev)} + Desembarco tránsito: ${fmtNum(mCurr.transitArrivingPrev)}</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">${info.forecastLabel}</div>
+                  <div class="kpi-val" style="color:#fcd34d;">${fmtNum(info.forecastVal)} uds</div>
+                  <div class="kpi-sub">Déficit estimado frente a tu inventario: <strong>${fmtNum(Math.max(0, info.forecastVal - mCurr.invInicialMes))} uds</strong></div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Tarifas de Transporte (${info.month})</div>
+                  <div class="kpi-val" style="font-size:1rem;">🚢 $${info.barcoCost} | 🌐 $${info.mixtoCost} | ✈️ $${info.avionCost}</div>
+                  <div class="kpi-sub">Revisa la disponibilidad de cada ruta abajo</div>
+                </div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Almacén / Multa Quiebre</div>
+                  <div class="kpi-val" style="font-size:1.05rem; color:#f87171;">$${info.almCost}/u | $${info.quiebreCost}/u</div>
+                  <div class="kpi-sub">${st === 'r3' ? '⚠️ Proveedor $40 hasta 1,500 uds (Exceso: $55/u)' : 'Costo sobrante vs cliente perdido'}</div>
+                </div>
+              </div>
+
+              ${st !== 'r1' ? `
+                <!-- SIMULADOR WHAT-IF ANALÍTICO EN EL DISPOSITIVO DEL EQUIPO (R2, R3 y R4) -->
+                <div style="background:rgba(8,51,68,0.45); border:1px solid var(--accent); border-radius:12px; padding:14px; margin-bottom:16px;">
+                  <div style="font-size:0.84rem; font-weight:800; color:#67e8f9; margin-bottom:8px;">
+                    🧠 Simulador Prescriptivo “What-If” (${info.month}) — Basado en tu Inventario Inicial de ${fmtNum(mCurr.invInicialMes)} uds:
+                  </div>
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+                    <span style="font-size:0.78rem; color:#cbd5e1;">Pedido prueba:</span>
+                    <input type="range" min="0" max="4500" step="100" value="${draft.simQ}" style="flex:1; min-width:140px;" oninput="window.updateTeamSim('${st}','simQ',this.value)" />
+                    <strong style="color:#fff; min-width:80px;">${fmtNum(draft.simQ)} uds</strong>
+                    <button type="button" class="qty-chip" style="background:${draft.simMode === 'BARCO' ? 'var(--accent)' : 'var(--bg-card)'}; color:#fff;" onclick="window.updateTeamSim('${st}','simMode','BARCO')">🚢 BARCO ($${info.barcoCost})</button>
+                    <button type="button" class="qty-chip" style="background:${draft.simMode === 'MIXTO' ? 'var(--purple)' : 'var(--bg-card)'}; color:#fff;" onclick="window.updateTeamSim('${st}','simMode','MIXTO')">🌐 MIXTO ($${info.mixtoCost})</button>
+                    <button type="button" class="qty-chip" style="background:${draft.simMode === 'AVION' ? 'var(--primary)' : 'var(--bg-card)'}; color:#fff;" onclick="window.updateTeamSim('${st}','simMode','AVION')">✈️ AVIÓN ($${info.avionCost})</button>
+                  </div>
+                  ${st === 'r4' ? `
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                      <button type="button" class="qty-chip" style="background:${draft.simPrice === 'PREMIUM' ? 'var(--primary)' : 'var(--bg-card)'};" onclick="window.updateTeamSim('r4','simPrice','PREMIUM')">💎 Premium ($115 | Dem ~2,200)</button>
+                      <button type="button" class="qty-chip" style="background:${draft.simPrice === 'ESTANDAR' ? 'var(--primary)' : 'var(--bg-card)'};" onclick="window.updateTeamSim('r4','simPrice','ESTANDAR')">⚖️ Estándar ($100 | Dem ~3,000)</button>
+                      <button type="button" class="qty-chip" style="background:${draft.simPrice === 'PROMO' ? 'var(--primary)' : 'var(--bg-card)'};" onclick="window.updateTeamSim('r4','simPrice','PROMO')">🔥 Promo ($88 | Dem ~3,800)</button>
+                    </div>
+                  ` : ''}
+                  <div style="background:#0f172a; padding:10px; border-radius:8px; font-size:0.8rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                    <span>Disp. Mes: <strong>${fmtNum(simMetrics.iDisp)} uds</strong> | Vende: <strong>${fmtNum(simMetrics.vendidas)}</strong> | Quiebre: <strong style="color:${simMetrics.quiebre > 0 ? '#f87171' : '#34d399'};">${fmtNum(simMetrics.quiebre)}</strong> | Pasa/Sobra: <strong>${fmtNum(simMetrics.sobrantesTotales)}</strong></span>
+                    <span>Utilidad Estimada: <strong style="color:${simMetrics.utilidadOperativa >= 120000 ? '#34d399' : '#fbbf24'}; font-size:0.95rem;">${fmtMoney(simMetrics.utilidadOperativa)}</strong></span>
+                  </div>
+                </div>
+              ` : ''}
+
+              ${canEdit ? `
+                ${st === 'r4' ? `
+                  <div style="margin-bottom:14px;">
+                    <label style="font-weight:700; font-size:0.86rem; display:block; margin-bottom:6px; color:#c4b5fd;">
+                      1A. Decisión Comercial de Ventas — Estrategia de Precio en Febrero:
+                    </label>
+                    <div class="mode-selector">
+                      <button type="button" class="mode-btn ${draft.priceTier === 'PREMIUM' ? 'selected' : ''}" onclick="window.setLocalTeamPrice('r4','PREMIUM')">
+                        💎 PREMIUM ($115/u)<span>Pronóstico IA: 2,100 uds</span>
+                      </button>
+                      <button type="button" class="mode-btn ${draft.priceTier === 'ESTANDAR' ? 'selected' : ''}" onclick="window.setLocalTeamPrice('r4','ESTANDAR')">
+                        ⚖️ ESTÁNDAR ($100/u)<span>Pronóstico IA: 2,900 uds</span>
+                      </button>
+                      <button type="button" class="mode-btn ${draft.priceTier === 'PROMO' ? 'selected' : ''}" onclick="window.setLocalTeamPrice('r4','PROMO')">
+                        🔥 PROMO ($88/u)<span>Pronóstico IA: 3,700 uds</span>
+                      </button>
+                    </div>
+                  </div>
+                ` : ''}
+
+                <div style="margin-bottom:14px;">
+                  <label style="font-weight:700; font-size:0.86rem; display:block; margin-bottom:6px;">
+                    1. Cantidad de Smartwatches a pedir a Asia en ${info.month} (Q):
+                  </label>
+                  <input type="number" class="input-box" value="${draft.q}" min="0" max="10000" step="100" oninput="window.updateLocalDraft('${st}','q',this.value)" />
+                  <div class="quick-qty-bar">
+                    ${[0, 500, 1000, 1500, 2000, 2200, 2500, 3000, 3500].map(v => `
+                      <button type="button" class="qty-chip" onclick="window.setLocalQuickQty('${st}', ${v})">${fmtNum(v)} uds</button>
+                    `).join('')}
+                  </div>
+                </div>
+
+                <div style="margin-bottom:14px;">
+                  <label style="font-weight:700; font-size:0.86rem; display:block; margin-bottom:6px;">
+                    2. Modo de Transporte Internacional:
+                  </label>
+                  <div class="mode-selector">
+                    <button type="button" class="mode-btn ${draft.mode === 'BARCO' ? 'selected' : ''}" onclick="window.setLocalTeamMode('${st}','BARCO')">
+                      🚢 BARCO ($${info.barcoCost}/u)<span>${st === 'r3' ? '100% a tiempo (Reabierto)' : (st === 'r4' ? '70% llega a tiempo' : 'Estándar marítimo')}</span>
+                    </button>
+                    <button type="button" class="mode-btn ${draft.mode === 'MIXTO' ? 'selected' : ''}" onclick="window.setLocalTeamMode('${st}','MIXTO')">
+                      🌐 MIXTO ($${info.mixtoCost}/u)<span>50% Marítimo + 50% Aéreo</span>
+                    </button>
+                    <button type="button" class="mode-btn ${draft.mode === 'AVION' ? 'selected' : ''}" onclick="window.setLocalTeamMode('${st}','AVION')">
+                      ✈️ AVIÓN ($${info.avionCost}/u)<span>100% garantizado en 1 sem</span>
+                    </button>
+                    <button type="button" class="mode-btn ${draft.mode === 'NINGUNO' ? 'selected' : ''}" onclick="window.setLocalTeamMode('${st}','NINGUNO')">
+                      🚫 NINGUNO ($0)<span>Pedido = 0 uds</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div style="margin-bottom:14px;">
+                  <label style="font-weight:700; font-size:0.86rem; display:block; margin-bottom:6px;">
+                    3. Justificación Ejecutiva del Comité S&amp;OP (Concursa por Bono de +$10,000):
+                  </label>
+                  <input type="text" class="input-box" style="font-weight:400; font-size:0.86rem;" placeholder="¿Cómo coordinaron su inventario inicial, demanda y transporte?" value="${escapeHtml(draft.note)}" oninput="window.updateLocalDraft('${st}','note',this.value)" />
+                </div>
+
+                <button type="button" class="btn btn-success" style="width:100%; padding:14px; font-size:0.98rem;" onclick="window.submitTeamDecision('${st}')">
+                  📤 Enviar Decisión Oficial de ${info.month}
+                </button>
+              ` : `
+                <div style="background:rgba(16,185,129,0.12); border:2px solid var(--success); border-radius:12px; padding:18px; text-align:center;">
+                  <div style="font-size:1.12rem; font-weight:800; color:#6ee7b7; margin-bottom:4px;">
+                    ✅ ¡Decisión de ${info.month} Guardada y Confirmada!
+                  </div>
+                  <div style="font-size:1rem; color:#fff; font-weight:700;">
+                    Pedido: ${fmtNum(sub.q)} uds vía ${sub.mode} ${st === 'r4' ? `| Precio: ${sub.priceTier}` : ''}
+                  </div>
+                  <div style="font-size:0.75rem; color:#94a3b8; margin-top:6px;">
+                    Hora: ${sub.time || 'Confirmado'} | Código de respaldo: <strong>${teamId}-${st.toUpperCase()}-${sub.q}-${sub.mode}</strong>
+                  </div>
+                  ${isOpen ? `
+                    <button type="button" class="btn btn-secondary" style="margin-top:10px; font-size:0.78rem;" onclick="window.enableTeamReEdit('${st}')">
+                      ✏️ Modificar antes de que cierren la ronda
+                    </button>
+                  ` : ''}
+                </div>
+              `}
+            </div>
+          `;
+          return;
+        }
+
+        // SI ESTÁ EN UNA PANTALLA DE ANÁLISIS MENSUAL (rev1, rev2, rev3, rev4)
+        if (st === 'rev1' || st === 'rev2' || st === 'rev3' || st === 'rev4') {
+          const rk = 'r' + st.replace('rev', '');
+          container.innerHTML = buildMonthlyReviewHTML(rk, false);
+          return;
+        }
+
+        // SI ESTÁ EN LA PANTALLA FINAL DE CLASIFICACIÓN ACUMULADA
+        if (st === 'results') {
+          container.innerHTML = buildFinalCumulativeHTML(false);
+        }
+      }
+
+      /* HANDLERS DEL EQUIPO */
+      window.updateLocalDraft = function(rk, field, val) {
+        if (field === 'q') {
+          const num = Math.max(0, Math.round(Number(val) || 0));
+          teamDraft[rk].q = num;
+          teamDraft[rk].simQ = num;
+          if (num === 0) teamDraft[rk].mode = 'NINGUNO';
+          else if (teamDraft[rk].mode === 'NINGUNO') teamDraft[rk].mode = 'BARCO';
+        } else {
+          teamDraft[rk][field] = val;
+        }
+      };
+
+      window.setLocalQuickQty = function(rk, qty) {
+        teamDraft[rk].q = qty;
+        teamDraft[rk].simQ = qty;
+        if (qty === 0) teamDraft[rk].mode = 'NINGUNO';
+        else if (teamDraft[rk].mode === 'NINGUNO') teamDraft[rk].mode = 'BARCO';
+        renderCurrentRoleView();
+      };
+
+      window.setLocalTeamMode = function(rk, mode) {
+        teamDraft[rk].mode = mode;
+        teamDraft[rk].simMode = mode;
+        if (mode === 'NINGUNO') teamDraft[rk].q = 0;
+        else if (teamDraft[rk].q === 0) teamDraft[rk].q = 500;
+        renderCurrentRoleView();
+      };
+
+      window.setLocalTeamPrice = function(rk, priceTier) {
+        teamDraft[rk].priceTier = priceTier;
+        teamDraft[rk].simPrice = priceTier;
+        renderCurrentRoleView();
+      };
+
+      window.updateTeamSim = function(rk, field, val) {
+        if (field === 'simQ') teamDraft[rk].simQ = Number(val);
+        else teamDraft[rk][field] = val;
+        renderCurrentRoleView();
+      };
+
+      window.submitTeamDecision = function(rk) {
+        if (!myRole || myRole === 'HOST') return;
+        const d = teamDraft[rk];
+        const q = Math.max(0, Math.round(Number(d.q) || 0));
+        const mode = q === 0 ? 'NINGUNO' : d.mode;
+        d.editing = false;
+        sendTeamDecisionPacket(myRole, rk, q, mode, d.priceTier, d.note);
+        renderCurrentRoleView();
+      };
+
+      window.enableTeamReEdit = function(rk) {
+        teamDraft[rk].editing = true;
+        renderCurrentRoleView();
+      };
+
+      /* =================================================================
+         8. PANTALLA FINAL ACUMULADA (4 MESES: NOVIEMBRE A FEBRERO)
+         ================================================================= */
+      function buildFinalCumulativeHTML(isHost) {
+        const teamsArr = [gameState.teams.A, gameState.teams.B, gameState.teams.C];
+        const evaluated = teamsArr.map(t => {
+          const tl = computeTeamFullTimeline(t, false);
+          const totalProfit = tl.r4.cumProfitAfterMonth;
+          const avgFillRate = tl.r4.cumFillRateAfterMonth;
+          const totalBonuses = tl.r1.bonusVal + tl.r2.bonusVal + tl.r3.bonusVal + tl.r4.bonusVal;
+          const endLeftover = tl.r4.sobrantesTotales;
+          return { team: t, tl, totalProfit, avgFillRate, totalBonuses, endLeftover };
+        });
+
+        const ranked = [...evaluated].sort((a, b) => {
+          if (b.totalProfit !== a.totalProfit) return b.totalProfit - a.totalProfit;
+          return b.avgFillRate - a.avgFillRate;
+        });
+
+        const medals = ['🥇', '🥈', '🥉'];
+
+        return `
+          <div class="hero-banner" style="background:linear-gradient(135deg, rgba(16,185,129,0.25), rgba(15,23,42,0.96)); border-color:var(--success);">
+            <div>
+              <span class="badge badge-green">Balance Consolidado de 4 Meses (Noviembre – Febrero)</span>
+              <h2 style="font-size:1.5rem; color:#fff; margin-bottom:4px;">🏆 Clasificación Final de Comités S&amp;OP e IBP</h2>
+              <p style="color:#cbd5e1; font-size:0.88rem;">
+                Resultados calculados automáticamente sumando el desempeño encadenado de Noviembre, Diciembre, Enero y Febrero.
+              </p>
+            </div>
+          </div>
+
+          <div class="teams-status-grid">
+            ${ranked.map((it, idx) => `
+              <div class="card" style="text-align:center; border:2px solid ${idx === 0 ? '#fbbf24' : 'var(--border)'};">
+                <div style="font-size:2.4rem;">${medals[idx]}</div>
+                <span class="badge ${idx === 0 ? 'badge-amber' : 'badge-blue'}">PUESTO #${idx + 1} — COMITÉ S&amp;OP</span>
+                <h3 style="color:${it.team.color}; font-size:1.25rem; margin:6px 0;">${it.team.name}</h3>
+                <div style="font-size:1.95rem; font-weight:900; color:#fff; margin:6px 0;">${fmtMoney(it.totalProfit)}</div>
+                <div style="font-size:0.78rem; color:var(--text-muted);">
+                  Nov: ${fmtMoney(it.tl.r1.utilidadTotalMes)} | Dic: ${fmtMoney(it.tl.r2.utilidadTotalMes)} |
+                  Ene: ${fmtMoney(it.tl.r3.utilidadTotalMes)} | Feb: ${fmtMoney(it.tl.r4.utilidadTotalMes)}
+                </div>
+                <div style="font-size:0.8rem; color:#6ee7b7; margin-top:8px; font-weight:700;">
+                  Nivel de Servicio Global (4 Meses): ${it.avgFillRate.toFixed(1)}% | Sobrante Final Feb: ${fmtNum(it.endLeftover)} uds
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="card">
+            <h3 style="font-size:1.02rem; color:#fff; margin-bottom:10px;">📊 Matriz Comparativa de los 4 Meses por Sucursal</h3>
+            <div style="overflow-x:auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Posición</th>
+                    <th>Sucursal</th>
+                    <th>Noviembre (R1: Inicial)</th>
+                    <th>Diciembre (R2: Analítica IA)</th>
+                    <th>Enero (R3: Crisis Prov.)</th>
+                    <th>Febrero (R4: Reto IBP)</th>
+                    <th>Bonos S&amp;OP</th>
+                    <th>UTILIDAD ACUMULADA 4 MESES</th>
+                    <th>Fill Rate Global</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ranked.map((it, idx) => `
+                    <tr>
+                      <td><strong>${medals[idx]} #${idx + 1}</strong></td>
+                      <td><strong style="color:${it.team.color};">${it.team.name}</strong></td>
+                      <td>${fmtMoney(it.tl.r1.utilidadOperativa)} <span style="font-size:0.71rem; color:#94a3b8;">(${fmtNum(it.tl.r1.q)} ${it.tl.r1.mode})</span></td>
+                      <td>${fmtMoney(it.tl.r2.utilidadOperativa)} <span style="font-size:0.71rem; color:#94a3b8;">(${fmtNum(it.tl.r2.q)} ${it.tl.r2.mode})</span></td>
+                      <td>${fmtMoney(it.tl.r3.utilidadOperativa)} <span style="font-size:0.71rem; color:#94a3b8;">(${fmtNum(it.tl.r3.q)} ${it.tl.r3.mode})</span></td>
+                      <td>${fmtMoney(it.tl.r4.utilidadOperativa)} <span style="font-size:0.71rem; color:#94a3b8;">(${fmtNum(it.tl.r4.q)} ${it.tl.r4.mode} / ${it.tl.r4.priceTier})</span></td>
+                      <td class="num-pos">+${fmtMoney(it.totalBonuses)}</td>
+                      <td class="num-pos" style="font-size:1.05rem;">${fmtMoney(it.totalProfit)}</td>
+                      <td>${it.avgFillRate.toFixed(1)}%</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="border-color:var(--primary);">
+            <span class="badge badge-blue">Reflexión Académica Final — Del S&amp;OP Tradicional al IBP Digital</span>
+            <h3 style="font-size:1.1rem; color:#fff; margin-bottom:10px;">🎓 Síntesis de Aprendizaje de los 4 Meses</h3>
+            <div class="kpi-grid" style="margin-bottom:0;">
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#fcd34d;">1. Noviembre (Datos Históricos)</div>
+                <p style="font-size:0.79rem; color:#cbd5e1; margin-top:5px;">
+                  Confiar únicamente en promedios pasados (2,000 uds) generó quiebres severos ante el cambio brusco de la demanda y dejó mercancía atrapada en el puerto.
+                </p>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#38bdf8;">2. Diciembre (Analítica Predictiva)</div>
+                <p style="font-size:0.79rem; color:#cbd5e1; margin-top:5px;">
+                  El pronóstico de Machine Learning y la visibilidad del inventario en tránsito permitieron cubrir el pico navideño usando avión de forma rentable.
+                </p>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#f87171;">3. Enero (Riesgo de Proveedores)</div>
+                <p style="font-size:0.79rem; color:#cbd5e1; margin-top:5px;">
+                  Demostró que en S&amp;OP no basta con repetir la misma fórmula: cuando el puerto reabrió ($8/u) y el avión subió a $35/u, el análisis de costos salvó el margen frente al recorte del proveedor asiático.
+                </p>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label" style="color:#c084fc;">4. Febrero (Coordinación IBP)</div>
+                <p style="font-size:0.79rem; color:#cbd5e1; margin-top:5px;">
+                  Integró Ventas (Precio y moldeamiento de demanda), Logística (Ruta Multimodal al 100%) y Finanzas (Cero obsolescencia al cierre de temporada).
+                </p>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Inicializar reloj visual al abrir
+      updateHeaderTimer();
+    })();
+  </script>
+</body>
+</html>
